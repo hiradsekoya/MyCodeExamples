@@ -7,35 +7,24 @@ import os
 
 bp = Blueprint("telemetry", __name__)
 
-# ---------------------------------------------------
-# READ SIMULATION TOKEN FROM ENV
-# ---------------------------------------------------
-SIM_TOKEN = os.getenv("SIM_TOKEN")  # MUST match simulator
+SIM_TOKEN = os.getenv("SIM_TOKEN") 
 
 
-# ---------------------------------------------------
-# POST /api/telemetry/ingest
-# (simulation OR real device)
-# ---------------------------------------------------
 @bp.route("/ingest", methods=["POST"])
 def ingest():
-
-    # --- 1) CHECK HEADERS ---
     sim_token = request.headers.get("Sim-Token")
     is_simulation = (sim_token == SIM_TOKEN)
 
-    # --- 2) SIMULATION → skip JWT ---
     if is_simulation:
         user_id = None
     else:
-        # Validate JWT
+
         try:
             verify_jwt_in_request()
             user_id = int(get_jwt_identity())
         except Exception:
             return jsonify({"msg": "Missing or invalid token"}), 401
 
-    # --- 3) PARSE BODY ---
     data = request.get_json()
     if not data:
         return jsonify({"msg": "invalid json"}), 400
@@ -44,20 +33,17 @@ def ingest():
     if not device_uid:
         return jsonify({"msg": "device_uid required"}), 400
 
-    # --- 4) LOOK UP DEVICE ---
     device = Device.query.filter_by(device_uid=device_uid).first()
     if not device:
         return jsonify({"msg": "device not registered"}), 404
 
     zone = Zone.query.get(device.zone_id)
 
-    # Ownership rules (skip for simulation)
     if not is_simulation:
         farm = Farm.query.filter_by(id=zone.farm_id, owner_id=user_id).first()
         if not farm:
             return jsonify({"msg": "device does not belong to your farms"}), 403
 
-    # --- 5) EXTRACT DATA ---
     temperature = data.get("temperature")
     humidity = data.get("humidity")
     soil_moisture = data.get("soil_moisture")
@@ -70,7 +56,6 @@ def ingest():
         if not ts else datetime.fromisoformat(ts.replace("Z", "+00:00"))
     )
 
-    # --- 6) SAVE TELEMETRY ---
     tel = Telemetry(
         device_id=device.id,
         temperature=temperature,
@@ -86,7 +71,6 @@ def ingest():
     db.session.add(tel)
     db.session.commit()
 
-    # --- 7) UPDATE DIGITAL TWIN ---
     zone.twin_state = {
         "temperature": temperature,
         "humidity": humidity,
@@ -103,9 +87,6 @@ def ingest():
     return jsonify({"msg": "ok"}), 201
 
 
-# ---------------------------------------------------
-# GET /api/telemetry/latest
-# ---------------------------------------------------
 @bp.route("/latest", methods=["GET"])
 def latest_snapshot():
     try:
@@ -145,9 +126,7 @@ def latest_snapshot():
     }), 200
 
 
-# ---------------------------------------------------
-# GET /api/telemetry/history
-# ---------------------------------------------------
+
 @bp.route("/history", methods=["GET"])
 def history():
     try:
